@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
+	"sync/atomic"
 )
 
 type body struct {
@@ -18,8 +20,24 @@ type body struct {
 
 func checkError(e error) {
 	if e != nil {
-		log.Fatal(e)
+		log.Fatal("Failed to create document: ", e)
 	}
+}
+
+func createDocument(num uint64, total uint64, wg *sync.WaitGroup, counter *atomic.Uint64) {
+	reqBody := body{Author: "tools", Title: strconv.FormatUint(num, 10)}
+	jsonBody, err := json.Marshal(reqBody)
+	checkError(err)
+
+	response, err := http.Post("http://127.0.0.1:8080/api/document/create",
+		"application/json",
+		bytes.NewBuffer(jsonBody),
+	)
+
+	checkError(err)
+	checkError(response.Body.Close())
+	fmt.Printf("Created document %v/%v\n", counter.Add(1), total)
+	wg.Done()
 }
 
 func main() {
@@ -44,19 +62,14 @@ func main() {
 	amountOfFiles, err := strconv.ParseUint(string(line), 10, 64)
 	checkError(err)
 
+	var wg sync.WaitGroup
+	var counter atomic.Uint64
 	for i := range amountOfFiles {
-		fmt.Printf("Creating %v/%v\n", i+1, amountOfFiles)
-		reqBody := body{Author: "tools", Title: strconv.FormatUint(i+1, 10)}
-		jsonBody, err := json.Marshal(reqBody)
-		checkError(err)
-
-		response, err := http.Post("http://127.0.0.1:8080/api/document/create",
-			"application/json",
-			bytes.NewBuffer(jsonBody),
-		)
-
-		checkError(err)
-		checkError(response.Body.Close())
+		wg.Add(1)
+		go createDocument(i+1, amountOfFiles, &wg, &counter)
 	}
+
+	wg.Wait()
+
 	os.Exit(0)
 }
